@@ -5,3 +5,10 @@ data/*.db-*
 .env
 *.log
 e2e-screenshots
+cdp-service/.venv
+__pycache__
+.pytest_cache
+
+Claude outputs/
+cdp-service/.venv/
+__pycache__/

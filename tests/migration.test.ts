@@ -8,7 +8,7 @@ import { openDatabase } from '../server/db';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
 describe('database migrations', () => {
-  it('adds app_client to an existing v1 database without losing rows', () => {
+  it('upgrades an existing v1 database (app_client, CDP columns, calibration table) without losing rows', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'veriq-mig-'));
     const file = path.join(dir, 'v1.db');
     // Minimal v1 verification_events table, as created before the migration existed.
@@ -24,8 +24,10 @@ describe('database migrations', () => {
 
     const db = openDatabase(file);
     const cols = db.prepare('PRAGMA table_info(verification_events)').all().map((c) => c.name);
-    expect(cols).toContain('app_client');
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(2);
+    expect(cols).toEqual(expect.arrayContaining(['app_client', 'check_type', 'cdp_score', 'cdp_threshold']));
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(3);
+    expect(db.prepare(`SELECT check_type FROM verification_events WHERE id = 'evt_old'`).get()?.check_type).toBe('payload');
+    expect(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'calibration_samples'`).get()).toBeTruthy();
     expect(db.prepare(`SELECT app_client FROM verification_events WHERE id = 'evt_old'`).get()?.app_client).toBeNull();
     db.close();
     // Re-opening is a no-op.

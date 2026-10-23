@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { Router } from 'express';
 import { z } from 'zod';
 import { rulesSchema } from '../../shared/schemas';
@@ -11,15 +12,35 @@ const qrListQuery = z.object({
   q: z.string().trim().max(100).optional(),
 });
 
-export function adminRoutes({ store, config, sign }: AppContext): Router {
+/** Private IPv4 addresses (RFC 1918) of this machine. */
+function lanAddresses(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((i): i is os.NetworkInterfaceInfo => Boolean(i && i.family === 'IPv4' && !i.internal))
+    .map((i) => i.address)
+    .filter((a) => /^(10.|192.168.|172.(1[6-9]|2d|3[01]).)/.test(a));
+}
+
+export function adminRoutes({ store, config, sign, cdp }: AppContext): Router {
   const r = Router();
 
-  const settings = (): SettingsPayload => ({
+  const settings = async (): Promise<SettingsPayload> => ({
     rules: store.getRules(),
     payloadFormat: 'VQ1.<token>.<signature>',
     appClients: [...new Set(config.appKeys.values())],
     rateLimitPerMinute: config.verifyRateLimitPerMinute,
     databasePath: config.databasePath,
+    cdp: {
+      threshold: store.getCdpThreshold(config.cdp.defaultThreshold),
+      defaultThreshold: config.cdp.defaultThreshold,
+      gridSize: config.cdp.gridSize,
+      cellMm: config.cdp.cellMm,
+      patternMm: config.cdp.gridSize * config.cdp.cellMm,
+      qrMm: config.cdp.qrMm,
+      serviceUrl: config.cdp.serviceUrl,
+      serviceOnline: (await cdp.health()).online,
+    },
+    lanAddresses: lanAddresses(),
   });
 
   r.get('/stats/overview', (_req, res) => {
@@ -30,13 +51,19 @@ export function adminRoutes({ store, config, sign }: AppContext): Router {
     res.json({ items: store.listQrCodes(parse(qrListQuery, req.query), sign) });
   });
 
-  r.get('/settings', (_req, res) => {
-    res.json(settings());
+  r.get('/settings', async (_req, res, next) => {
+    settings().then((s) => res.json(s), next);
   });
 
-  r.put('/settings/rules', (req, res) => {
+  r.put('/settings/rules', (req, res, next) => {
     store.setRules(parse(rulesSchema, req.body));
-    res.json(settings());
+    settings().then((s) => res.json(s), next);
+  });
+
+  r.put('/settings/cdp', (req, res, next) => {
+    const { threshold } = parse(z.object({ threshold: z.number().min(0).max(1) }), req.body);
+    store.setCdpThreshold(Math.round(threshold * 1000) / 1000);
+    settings().then((s) => res.json(s), next);
   });
 
   r.post('/admin/reset-demo', (_req, res) => {

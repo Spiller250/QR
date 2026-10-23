@@ -11,13 +11,16 @@
     "dev": "concurrently -k -n api,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch --clear-screen=false server/index.ts",
     "dev:web": "vite",
+    "dev:lan": "concurrently -k -n api,web -c blue,magenta \"npm:dev:server\" \"vite --host\"",
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit && vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "reset": "tsx server/scripts/reset.ts",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "cdp": "powershell -ExecutionPolicy Bypass -File cdp-service/run-cdp.ps1",
+    "cdp:test": "powershell -ExecutionPolicy Bypass -File cdp-service/run-cdp.ps1 -Test"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.5",
@@ -26,6 +29,8 @@
     "express-rate-limit": "^7.5.1",
     "helmet": "^8.3.0",
     "lucide-react": "^1.61.0",
+    "multer": "^1.4.5-lts.2",
+    "pdf-lib": "^1.17.1",
     "qr-scanner": "^1.4.2",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
@@ -36,6 +41,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/express": "^4.17.25",
+    "@types/multer": "^1.4.13",
     "@types/node": "^22.20.5",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.31",

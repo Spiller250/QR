@@ -6,6 +6,8 @@ export const SERIES = [
   { key: 'suspicious', label: 'Suspicious', color: '#e8a33d' },
   { key: 'invalid', label: 'Invalid', color: '#d9534a' },
   { key: 'revoked', label: 'Revoked', color: '#8a94a8' },
+  { key: 'copy_suspected', label: 'Copy suspected', color: '#9b2c6e' },
+  { key: 'unreadable', label: 'Unreadable photo', color: '#c4ccd8' },
 ] as const;
 
 const W = 720;
@@ -15,7 +17,7 @@ const PAD = { top: 12, right: 8, bottom: 26, left: 30 };
 /** Lightweight stacked bar chart (SVG) of daily verification attempts. */
 export function ActivityChart({ data }: { data: OverviewStats['daily'] }) {
   const [hover, setHover] = useState<number | null>(null);
-  const totals = data.map((d) => d.authentic + d.suspicious + d.invalid + d.revoked);
+  const totals = data.map((d) => SERIES.reduce((n, s) => n + d[s.key], 0));
   const max = Math.max(4, ...totals);
   const step = Math.ceil(max / 4);
   const top = step * 4;

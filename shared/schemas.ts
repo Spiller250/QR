@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PRODUCT_CATEGORIES, PRODUCT_STATUSES, SCAN_SOURCES } from './constants';
+import { PRODUCT_CATEGORIES, PRODUCT_STATUSES, SCAN_SOURCES, VERIFICATION_RESULTS } from './constants';
 
 const trimmed = (label: string, max: number) =>
   z
@@ -89,7 +89,7 @@ export const productListQuerySchema = z.object({
 
 export const logListQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
-  result: z.enum(['authentic', 'suspicious', 'invalid', 'revoked']).optional(),
+  result: z.enum(VERIFICATION_RESULTS).optional(),
   flagged: z.enum(['true', 'false']).optional(),
   productId: z.string().max(64).optional(),
   source: z.enum(SCAN_SOURCES).optional(),

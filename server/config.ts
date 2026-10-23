@@ -12,10 +12,23 @@ export interface AppConfig {
   databasePath: string;
   verifyRateLimitPerMinute: number;
   isProduction: boolean;
+  cdp: CdpConfig;
+}
+
+/** Copy Detection Pattern settings. Geometry must match what was printed. */
+export interface CdpConfig {
+  secret: string;
+  serviceUrl: string;
+  /** Default decision threshold; the operator can override it in Settings (stored in SQLite). */
+  defaultThreshold: number;
+  gridSize: number;
+  cellMm: number;
+  qrMm: number;
 }
 
 const DEV_HASH_SECRET = 'change-me-local-dev-only-secret';
 const DEV_SIGNING_SECRET = 'change-me-local-dev-only-qr-signing-secret';
+const DEV_CDP_SECRET = 'change-me-local-dev-only-cdp-secret';
 const DEV_APP_KEYS = 'web-scanner:dev-web-scanner-key,flutter-app:dev-flutter-app-key';
 
 /** Parses `client-id:key,client-id:key`. Invalid entries are rejected loudly. */
@@ -46,6 +59,14 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     databasePath: path.resolve(env.DATABASE_PATH ?? './data/veriq.db'),
     verifyRateLimitPerMinute: Number(env.VERIFY_RATE_LIMIT_PER_MINUTE ?? 60),
     isProduction: env.NODE_ENV === 'production',
+    cdp: {
+      secret: env.CDP_SECRET ?? DEV_CDP_SECRET,
+      serviceUrl: (env.CDP_SERVICE_URL ?? 'http://127.0.0.1:8100').replace(/\/+$/, ''),
+      defaultThreshold: num(env.CDP_THRESHOLD, 0.6, 0, 1),
+      gridSize: num(env.CDP_GRID_SIZE, 40, 16, 64),
+      cellMm: num(env.CDP_CELL_MM, 0.15, 0.08, 0.5),
+      qrMm: num(env.LABEL_QR_MM, 30, 15, 80),
+    },
     ...overrides,
   };
 
@@ -58,6 +79,9 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   if (config.qrSigningSecret === config.tokenHashSecret) {
     console.warn('[veriq] QR_SIGNING_SECRET and TOKEN_HASH_SECRET are identical. Use two independent secrets.');
   }
+  if (config.cdp.secret === DEV_CDP_SECRET) {
+    console.warn('[veriq] CDP_SECRET is using the local development default. Set it in .env for any shared environment.');
+  }
   if (config.appKeys.size === 0) {
     console.warn('[veriq] APP_KEYS is empty — every /api/verify request will be rejected.');
   }
@@ -65,3 +89,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 export type Secrets = Pick<AppConfig, 'tokenHashSecret' | 'qrSigningSecret'>;
+
+function num(raw: string | undefined, fallback: number, min: number, max: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < min || v > max) throw new Error(`Invalid numeric setting "${raw}" (expected ${min}–${max}).`);
+  return v;
+}

@@ -3,12 +3,13 @@ import type { Express } from 'express';
 import { createApp } from '../server/app';
 import { loadConfig } from '../server/config';
 import { openDatabase } from '../server/db';
+import type { CdpClient } from '../server/lib/cdpClient';
 
 export const WEB_KEY = 'test-web-scanner-key-0001';
 export const FLUTTER_KEY = 'test-flutter-app-key-0001';
 export const SIGNING_SECRET = 'test-qr-signing-secret';
 
-export async function setup(opts: { seed?: boolean } = {}) {
+export async function setup(opts: { seed?: boolean; cdpClient?: CdpClient; cdpServiceUrl?: string } = {}) {
   const config = loadConfig({
     databasePath: ':memory:',
     tokenHashSecret: 'test-hash-secret',
@@ -21,8 +22,9 @@ export async function setup(opts: { seed?: boolean } = {}) {
     adminPassword: 'pw',
     verifyRateLimitPerMinute: 10_000,
   });
+  config.cdp = { ...config.cdp, secret: 'test-cdp-secret', defaultThreshold: 0.6, serviceUrl: opts.cdpServiceUrl ?? 'http://127.0.0.1:9' };
   const db = openDatabase(':memory:');
-  const { app, ctx } = createApp(db, config);
+  const { app, ctx } = createApp(db, config, { cdpClient: opts.cdpClient });
   if (opts.seed) {
     const { seedDemoData } = await import('../server/seed');
     seedDemoData(ctx.store, config);

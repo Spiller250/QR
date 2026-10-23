@@ -66,8 +66,14 @@ const LAYERS: { icon: ReactNode; title: string; body: string; status: Status }[]
   },
   {
     icon: <ShieldCheck size={18} />,
-    title: 'Physical anti-counterfeit protection',
-    body: 'Nothing in this POC proves that the physical label being scanned is the original. A photographed or reprinted QR code carries the identical token and is indistinguishable to the server.',
+    title: 'Copy Detection Pattern (CDP) — physical label check',
+    body: 'Each label carries a 6 mm random pattern of 0.15 mm cells in the centre of its QR code, derived from a server secret. POST /api/verify-physical photographs the label and scores how faithfully the cells survived: first-generation prints keep them crisp, photocopies, re-prints of photos and screen photos degrade them. The score is a calibrated heuristic, not proof — it depends on consistent high-quality printing, a sharp close-up capture and a threshold tuned on real samples.',
+    status: 'heuristic',
+  },
+  {
+    icon: <Nfc size={18} />,
+    title: 'Hardware-backed physical authenticity',
+    body: 'Cryptographic proof that the physical item is genuine (e.g. secure NFC tags answering a fresh challenge) is not implemented. It is the strongest option and cannot be copied by imaging.',
     status: 'not',
   },
 ];
@@ -105,9 +111,9 @@ const OPTIONS: { icon: ReactNode; title: string; body: string; notes: string[] }
   },
   {
     icon: <ScanSearch size={17} />,
-    title: 'Image-based label inspection',
-    body: 'Analysing print characteristics of the label image may help detect some reproductions, subject to rigorous testing and validation.',
-    notes: ['Not reliable against all photographs or high-quality prints', 'Accuracy must be measured before any claims'],
+    title: 'Production-grade copy detection',
+    body: 'This POC includes a basic CDP. A production deployment would need print-process control, larger validated datasets and an independently tested false-accept / false-reject rate.',
+    notes: ['A skilled forger with high-end scanning/printing may defeat a basic CDP', 'Error rates must be measured on real prints before any claims'],
   },
 ];
 
@@ -206,6 +212,7 @@ export function SecurityPage() {
           <li>Scanner IDs and locations are self-reported by the client. A production scanner app must enrol devices and authenticate them.</li>
           <li>App keys are static per-client identifiers. The web scanner's key is visible in its JavaScript bundle; a determined attacker can extract any key shipped in an app. Use app attestation and key rotation in production.</li>
           <li>The QR payload is plain text: anyone can read or copy it. The signature prevents forging new payloads, not copying existing ones.</li>
+          <li>The copy-detection pattern is not 100% copy-proof. Scores depend on printer, paper, camera and lighting; inkjet or low-quality printing lowers original scores, and a high-quality reproduction may pass. Thresholds must be calibrated per setup.</li>
           <li>The browser scanner is a proof of concept, not the dedicated Flutter application.</li>
           <li>Plaintext tokens of active labels are stored so labels can be re-downloaded; production would render labels once at print time and keep only the HMAC.</li>
           <li>SQLite storage and in-process rate limiting suit a single-node demo, not a distributed deployment.</li>

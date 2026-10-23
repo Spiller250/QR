@@ -4,6 +4,7 @@ import { APP_KEY } from '../api/client';
 import { useProducts } from '../api/hooks';
 import { AuthorizedScanner } from '../components/demo/AuthorizedScanner';
 import { ScenarioSimulator } from '../components/demo/ScenarioSimulator';
+import { PhoneCaptureCard } from '../components/demo/PhoneCaptureCard';
 import { EmptyState, LoadingBlock, PageHead } from '../components/ui';
 
 const LIVE_DEMO_SKU = 'AUR-MER-42-SLV';
@@ -58,7 +59,10 @@ export function LiveDemoPage() {
         </button>
       </div>
       {tab === 'scanner' ? (
-        <AuthorizedScanner />
+        <div className="stack">
+          <PhoneCaptureCard />
+          <AuthorizedScanner />
+        </div>
       ) : isLoading ? (
         <LoadingBlock />
       ) : productId ? (

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- VERIQ brand (web dashboard tokens) -->
+    <color name="veriq_navy">#0B1530</color>
+    <color name="veriq_navy_dark">#070E22</color>
+    <color name="veriq_blue">#5B8CFF</color>
+    <color name="ic_launcher_background">#0B1530</color>
+</resources>

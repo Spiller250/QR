@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- VERIQ mark (web favicon geometry scaled into the 108dp adaptive-icon canvas, inside the 66dp safe zone). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M39,42.75 L54,67.13 L69,42.75"
+        android:strokeColor="#5B8CFF"
+        android:strokeWidth="5.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M50.25,40.88 a3.75,3.75 0 1,0 7.5,0 a3.75,3.75 0 1,0 -7.5,0"
+        android:fillColor="#FFFFFF" />
+</vector>

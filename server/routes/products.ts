@@ -3,8 +3,9 @@ import { productInputSchema, productListQuerySchema, productUpdateSchema, tokenA
 import type { ProductDetail } from '../../shared/types';
 import type { AppContext } from '../app';
 import { HttpError, parse } from '../middleware/errors';
+import { buildLabelModel, renderLabelPdf, renderLabelSvg, renderPatternSvg } from '../lib/cdp';
 
-export function productRoutes({ store, labels, sign }: AppContext): Router {
+export function productRoutes({ store, labels, sign, config }: AppContext): Router {
   const r = Router();
 
   const detail = (id: string): ProductDetail => {
@@ -40,6 +41,37 @@ export function productRoutes({ store, labels, sign }: AppContext): Router {
 
   r.get('/:id', (req, res) => {
     res.json(detail(req.params.id));
+  });
+
+  /** Active label as a CDP-bearing model; the grid is regenerated from the token, never stored. */
+  const labelFor = (id: string) => {
+    const product = store.getProduct(id);
+    if (!product) throw new HttpError(404, 'PRODUCT_NOT_FOUND', 'Product not found.');
+    const token = store.getActiveToken(id);
+    if (!token?.tokenPlain) throw new HttpError(404, 'NO_ACTIVE_LABEL', 'This product has no active label.');
+    const model = buildLabelModel(sign(token.tokenPlain), token.tokenPlain, config.cdp);
+    return { product, model, text: { name: product.name, publicId: product.publicId, line2: `Batch ${product.batchNumber}` } };
+  };
+
+  /** Vector label at exact physical size (?variant=pattern for the zoomed pattern view). */
+  r.get('/:id/label.svg', (req, res) => {
+    const { model, text } = labelFor(req.params.id);
+    const svg = req.query.variant === 'pattern' ? renderPatternSvg(model) : renderLabelSvg(model, text);
+    res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'no-store').send(svg);
+  });
+
+  r.get('/:id/label.pdf', async (req, res, next) => {
+    try {
+      const { product, model, text } = labelFor(req.params.id);
+      const pdf = await renderLabelPdf(model, text);
+      res
+        .set('Content-Type', 'application/pdf')
+        .set('Cache-Control', 'no-store')
+        .set('Content-Disposition', `attachment; filename="veriq-label-${product.publicId}.pdf"`)
+        .send(Buffer.from(pdf));
+    } catch (err) {
+      next(err);
+    }
   });
 
   r.patch('/:id', (req, res) => {

@@ -1,6 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ProductInput, ProductUpdate, RepeatScanRules, VerifyRequest } from '../../shared/schemas';
 import type {
+  CalibrationSummary,
+  CalibrationTag,
   OverviewStats,
   Paginated,
   Product,
@@ -10,7 +12,7 @@ import type {
   VerificationEvent,
   VerifyResponse,
 } from '../../shared/types';
-import { api } from './client';
+import { api, del, upload } from './client';
 
 export type ProductQuery = {
   q?: string;
@@ -94,4 +96,47 @@ export function useSaveRules() {
 export function useResetDemo() {
   const invalidate = useInvalidateAll();
   return useMutation({ mutationFn: () => api.post<{ ok: boolean }>('/admin/reset-demo'), onSuccess: invalidate });
+}
+
+// ---------- Copy detection (CDP) ----------
+
+export const useCalibration = () =>
+  useQuery({ queryKey: ['calibration'], queryFn: () => api.get<CalibrationSummary>('/calibration/samples') });
+
+export function useAddCalibrationSample() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, tag, note }: { file: File; tag: CalibrationTag; note?: string }) => {
+      const form = new FormData();
+      form.append('tag', tag);
+      if (note) form.append('note', note);
+      form.append('image', file, file.name);
+      return upload<CalibrationSummary & { id: string }>('/calibration/samples', form);
+    },
+    onSuccess: (data) => qc.setQueryData(['calibration'], data),
+  });
+}
+
+export function useDeleteCalibrationSample() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string | 'all') => del<CalibrationSummary>(id === 'all' ? '/calibration/samples' : `/calibration/samples/${id}`),
+    onSuccess: (data) => qc.setQueryData(['calibration'], data),
+  });
+}
+
+export function useSaveCdpThreshold() {
+  const invalidate = useInvalidateAll();
+  return useMutation({ mutationFn: (threshold: number) => api.put<SettingsPayload>('/settings/cdp', { threshold }), onSuccess: invalidate });
+}
+
+/** Fetches an operator-only file (label SVG/PDF) with the session header and exposes it as an object URL. */
+export function useAuthedObjectUrl(path: string | null, version: string | number | undefined) {
+  const query = useQuery({
+    queryKey: ['blob', path, version],
+    enabled: Boolean(path),
+    staleTime: Infinity,
+    queryFn: async () => URL.createObjectURL(await (await api.raw(path!)).blob()),
+  });
+  return query.data ?? null;
 }

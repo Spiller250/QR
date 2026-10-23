@@ -14,6 +14,10 @@ import { verifyRoutes } from './routes/verify';
 import { productRoutes } from './routes/products';
 import { logRoutes } from './routes/logs';
 import { adminRoutes } from './routes/admin';
+import { verifyPhysicalRoutes } from './routes/verifyPhysical';
+import { calibrationRoutes } from './routes/calibration';
+import { httpCdpClient, type CdpClient } from './lib/cdpClient';
+import { createPhysicalVerifier, type PhysicalVerifier } from './services/physical';
 
 export interface AppContext {
   config: AppConfig;
@@ -22,16 +26,22 @@ export interface AppContext {
   verifier: ReturnType<typeof createVerificationService>;
   /** Renders the signed QR payload for a token (VQ1.<token>.<sig>). */
   sign: PayloadSigner;
+  cdp: CdpClient;
+  physical: PhysicalVerifier;
 }
 
-export function createApp(db: Db, config: AppConfig) {
+export function createApp(db: Db, config: AppConfig, opts: { cdpClient?: CdpClient } = {}) {
   const store = new Store(db);
+  const verifier = createVerificationService(store, { tokenHashSecret: config.tokenHashSecret, qrSigningSecret: config.qrSigningSecret });
+  const cdp = opts.cdpClient ?? httpCdpClient(config.cdp.serviceUrl);
   const ctx: AppContext = {
     config,
     store,
     labels: createLabelService(store, config.tokenHashSecret),
-    verifier: createVerificationService(store, { tokenHashSecret: config.tokenHashSecret, qrSigningSecret: config.qrSigningSecret }),
+    verifier,
     sign: (token) => buildQrPayload(token, config.qrSigningSecret),
+    cdp,
+    physical: createPhysicalVerifier({ store, verifier, cdp, cdpConfig: config.cdp }),
   };
 
   const app = express();
@@ -62,10 +72,12 @@ export function createApp(db: Db, config: AppConfig) {
   // Public endpoints (verify additionally requires an authorized X-App-Key)
   api.use('/auth', authRoutes(ctx, loginLimiter));
   api.use('/verify', verifyLimiter, verifyRoutes(ctx));
+  api.use('/verify-physical', verifyLimiter, verifyPhysicalRoutes(ctx));
   // Operator-only endpoints
   const operator = requireOperator(store);
   api.use('/products', operator, productRoutes(ctx));
   api.use('/verification-logs', operator, logRoutes(ctx));
+  api.use('/calibration/samples', operator, calibrationRoutes(ctx));
   api.use('/', operator, adminRoutes(ctx));
 
   app.use('/api', api, notFound);

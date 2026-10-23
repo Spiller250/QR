@@ -14,7 +14,12 @@ export const PRODUCT_STATUSES = ['active', 'inactive', 'recalled'] as const;
 /** Derived from tokens + scan history; not stored. */
 export const AUTH_STATES = ['verified', 'not_scanned', 'flagged', 'no_active_label'] as const;
 
-export const VERIFICATION_RESULTS = ['authentic', 'suspicious', 'invalid', 'revoked'] as const;
+/** `copy_suspected` and `unreadable` come from physical (CDP) verification only. */
+export const VERIFICATION_RESULTS = ['authentic', 'suspicious', 'invalid', 'revoked', 'copy_suspected', 'unreadable'] as const;
+
+export const CHECK_TYPES = ['payload', 'physical'] as const;
+
+export const CALIBRATION_TAGS = ['original', 'photocopy', 'screen'] as const;
 
 /** `public_page` is retired (URL labels) and kept only so historic log rows still type-check. */
 export const SCAN_SOURCES = ['simulator', 'camera', 'manual', 'public_page', 'seed'] as const;

@@ -1,8 +1,13 @@
 import type { SQLInputValue, SQLOutputValue } from 'node:sqlite';
 import type { Db } from './db';
 import { DEFAULT_RULES, rulesSchema, type ProductInput, type ProductUpdate, type RepeatScanRules } from '../shared/schemas';
+import { VERIFICATION_RESULTS } from '../shared/constants';
 import type {
   AuthState,
+  CalibrationSample,
+  CalibrationTag,
+  CheckType,
+  PhysicalResult,
   OverviewStats,
   Paginated,
   Product,
@@ -47,6 +52,20 @@ export interface NewEvent {
   scanNumber: number | null;
   userAgent: string | null;
   appClient: string | null;
+  checkType?: CheckType;
+  cdpScore?: number | null;
+  cdpThreshold?: number | null;
+}
+
+export interface NewCalibrationSample {
+  tag: CalibrationTag;
+  note: string | null;
+  status: PhysicalResult;
+  reasonCode: string | null;
+  score: number | null;
+  productId: string | null;
+  components: Record<string, number>;
+  diagnostics: CalibrationSample['diagnostics'];
 }
 
 /** Renders the QR payload for a token. Injected so the store never sees the signing secret. */
@@ -316,7 +335,7 @@ export class Store {
     return this.db
       .prepare(
         `SELECT created_at, scanner_id, location FROM verification_events
-         WHERE token_id = ? AND result IN ('authentic','suspicious') ORDER BY created_at DESC`,
+         WHERE token_id = ? AND result IN ('authentic','suspicious','copy_suspected') ORDER BY created_at DESC`,
       )
       .all(tokenId)
       .map((r) => ({ createdAt: str(r.created_at), scannerId: str(r.scanner_id), location: strOrNull(r.location) }));
@@ -327,8 +346,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO verification_events
-         (id, created_at, result, reason_code, reason, product_id, token_id, token_fingerprint, scanner_id, location, source, repeat_scan, flagged, rules_triggered, scan_number, user_agent, app_client)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, created_at, result, reason_code, reason, product_id, token_id, token_fingerprint, scanner_id, location, source, repeat_scan, flagged, rules_triggered, scan_number, user_agent, app_client, check_type, cdp_score, cdp_threshold)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -348,6 +367,9 @@ export class Store {
         e.scanNumber,
         e.userAgent,
         e.appClient,
+        e.checkType ?? 'payload',
+        e.cdpScore ?? null,
+        e.cdpThreshold ?? null,
       );
     return id;
   }
@@ -373,6 +395,9 @@ export class Store {
       scanNumber: r.scan_number === null ? null : num(r.scan_number),
       userAgent: strOrNull(r.user_agent),
       appClient: strOrNull(r.app_client),
+      checkType: (strOrNull(r.check_type) ?? 'payload') as CheckType,
+      cdpScore: r.cdp_score === null || r.cdp_score === undefined ? null : num(r.cdp_score),
+      cdpThreshold: r.cdp_threshold === null || r.cdp_threshold === undefined ? null : num(r.cdp_threshold),
     };
   }
 
@@ -434,7 +459,8 @@ export class Store {
     for (const r of authRows) authStateBreakdown[str(r.auth_state) as AuthState] = num(r.n);
 
     const resultRows = this.db.prepare('SELECT result, COUNT(*) AS n FROM verification_events GROUP BY result').all();
-    const resultBreakdown: Record<VerificationResult, number> = { authentic: 0, suspicious: 0, invalid: 0, revoked: 0 };
+    const zero = () => Object.fromEntries(VERIFICATION_RESULTS.map((k) => [k, 0])) as Record<VerificationResult, number>;
+    const resultBreakdown = zero();
     for (const r of resultRows) resultBreakdown[str(r.result) as VerificationResult] = num(r.n);
 
     const start = new Date();
@@ -450,7 +476,7 @@ export class Store {
     for (let i = 0; i < days; i++) {
       const d = new Date(start);
       d.setUTCDate(start.getUTCDate() + i);
-      daily.push({ date: d.toISOString().slice(0, 10), authentic: 0, suspicious: 0, invalid: 0, revoked: 0 });
+      daily.push({ date: d.toISOString().slice(0, 10), ...zero() });
     }
     const byDate = new Map(daily.map((d) => [d.date, d]));
     for (const r of dailyRows) {
@@ -503,8 +529,66 @@ export class Store {
     this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
   }
 
-  /** Removes all demo content (products, tokens, events, settings). Sessions are kept. */
+  getCdpThreshold(fallback: number): number {
+    const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'cdp_threshold'`).get();
+    const v = row ? Number(JSON.parse(str(row.value))) : NaN;
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : fallback;
+  }
+
+  setCdpThreshold(threshold: number): void {
+    this.db
+      .prepare(`INSERT INTO settings (key, value) VALUES ('cdp_threshold', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run(JSON.stringify(threshold));
+  }
+
+  // ---------- Calibration samples ----------
+
+  insertCalibrationSample(s: NewCalibrationSample): string {
+    const id = generateId('cal');
+    this.db
+      .prepare(
+        `INSERT INTO calibration_samples (id, created_at, tag, note, status, reason_code, score, product_id, components, diagnostics)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, new Date().toISOString(), s.tag, s.note, s.status, s.reasonCode, s.score, s.productId, JSON.stringify(s.components), JSON.stringify(s.diagnostics));
+    return id;
+  }
+
+  listCalibrationSamples(): CalibrationSample[] {
+    return this.db
+      .prepare(
+        `SELECT c.*, p.name AS product_name FROM calibration_samples c LEFT JOIN products p ON p.id = c.product_id ORDER BY c.created_at DESC`,
+      )
+      .all()
+      .map((r) => ({
+        id: str(r.id),
+        createdAt: str(r.created_at),
+        tag: str(r.tag) as CalibrationTag,
+        note: strOrNull(r.note),
+        status: str(r.status) as PhysicalResult,
+        reasonCode: strOrNull(r.reason_code),
+        score: r.score === null || r.score === undefined ? null : num(r.score),
+        productId: strOrNull(r.product_id),
+        productName: strOrNull(r.product_name),
+        components: JSON.parse(str(r.components)) as Record<string, number>,
+        diagnostics: JSON.parse(str(r.diagnostics)) as CalibrationSample['diagnostics'],
+      }));
+  }
+
+  deleteCalibrationSample(id: string): boolean {
+    return Number(this.db.prepare('DELETE FROM calibration_samples WHERE id = ?').run(id).changes) > 0;
+  }
+
+  clearCalibrationSamples(): void {
+    this.db.exec('DELETE FROM calibration_samples');
+  }
+
+  /**
+   * Removes demo content (products, tokens, events) and restores default repeat-scan rules.
+   * Sessions, calibration samples and the calibrated CDP threshold are kept: they describe
+   * the printer/camera setup, not the demo catalogue.
+   */
   wipeData(): void {
-    this.db.exec('DELETE FROM verification_events; DELETE FROM qr_tokens; DELETE FROM products; DELETE FROM settings;');
+    this.db.exec("DELETE FROM verification_events; DELETE FROM qr_tokens; DELETE FROM products; DELETE FROM settings WHERE key = 'rules';");
   }
 }

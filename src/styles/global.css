@@ -331,7 +331,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 /* ---------- QR & labels ---------- */
 .qr-frame { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: grid; place-items: center; }
 .qr-frame img { width: 100%; max-width: 220px; height: auto; image-rendering: pixelated; display: block; }
-.qr-thumb { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 4px; background: #fff; padding: 2px; image-rendering: pixelated; }
+.qr-thumb { width: 44px; height: 44px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 4px; background: #fff; padding: 2px; image-rendering: pixelated; }
 .token-box { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; overflow-wrap: anywhere; color: var(--text-2); }
 .id-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .id-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); }
@@ -526,3 +526,50 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .camera-app-head { background: #1f2937; color: #e5e7eb; font-size: 12px; padding: 8px 12px; display: flex; align-items: center; gap: 6px; }
 .camera-app-body { padding: 12px 14px; }
 .camera-app-text { margin-top: 4px; font-size: 13px; overflow-wrap: anywhere; color: var(--text); }
+
+/* ---------- Copy detection pattern ---------- */
+.cdp-zoom { display: grid; place-items: center; background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.cdp-zoom img { width: 100%; max-width: 300px; height: auto; image-rendering: pixelated; }
+
+/* ---------- Phone capture page (/scan-physical) ---------- */
+.scan-page { min-height: 100vh; max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
+.scan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.scan-cta {
+  width: 100%; min-height: 220px; border: 0; border-radius: 16px; background: var(--navy-900); color: #fff; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font: inherit; box-shadow: var(--shadow-md);
+  background-image: radial-gradient(circle at 100% 0%, rgba(91, 140, 255, 0.25), transparent 55%);
+}
+.scan-cta span { font-size: 22px; font-weight: 700; }
+.scan-cta small { color: #aab5d0; font-size: 14px; }
+.scan-cta:active { transform: scale(0.99); }
+.scan-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm); }
+.scan-tips { padding: 14px 16px; }
+.scan-tips ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.scan-tips li { display: flex; gap: 10px; align-items: flex-start; color: var(--text-2); font-size: 14px; }
+.scan-tips li svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.scan-preview { display: block; width: 100%; max-height: 300px; object-fit: contain; background: #0f1a33; }
+.scan-result { border-radius: 16px; padding: 26px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; color: #fff; animation: rise 0.25s ease; }
+.scan-result h1 { font-size: 28px; letter-spacing: -0.02em; color: inherit; }
+.scan-result p { font-size: 15px; opacity: 0.95; max-width: 400px; }
+.scan-result.ok { background: #0f7a55; }
+.scan-result.bad { background: #b42318; }
+.scan-result.neutral { background: #5b6476; }
+.scan-result .btn { margin-top: 10px; }
+.scan-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0 0; text-align: left; width: 100%; max-width: 380px; }
+.scan-result .scan-facts { background: rgba(255, 255, 255, 0.12); border-radius: 10px; padding: 12px 14px; }
+.scan-facts dt { opacity: 0.8; }
+.scan-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.scan-card .scan-facts dt { color: var(--muted); }
+.scan-score { margin-top: 8px; font-size: 13px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+.scan-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+
+/* ---------- Calibration histogram ---------- */
+.histo { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); align-items: end; gap: 2px; height: 160px; padding: 0 2px; position: relative; border-bottom: 1px solid var(--border-strong); }
+.histo-col { display: flex; flex-direction: column-reverse; height: 100%; }
+.histo-col i { display: block; width: 100%; }
+.histo-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--subtle); margin-top: 4px; }
+.histo-mark { position: absolute; top: -6px; bottom: 0; width: 0; border-left: 2px dashed; }
+.histo-mark span { position: absolute; top: -18px; font-size: 11px; white-space: nowrap; font-weight: 600; }
+.histo-mark.left span { right: 4px; }
+.histo-mark.right span { left: 4px; }
+.qr-link { width: 140px; height: 140px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 4px; image-rendering: pixelated; }

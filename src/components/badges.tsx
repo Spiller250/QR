@@ -5,6 +5,8 @@ const RESULT: Record<VerificationResult, { cls: string; label: string }> = {
   suspicious: { cls: 'badge-warning', label: 'Suspicious' },
   invalid: { cls: 'badge-danger', label: 'Invalid' },
   revoked: { cls: 'badge-danger', label: 'Revoked' },
+  copy_suspected: { cls: 'badge-danger', label: 'Copy suspected' },
+  unreadable: { cls: 'badge-neutral', label: 'Unreadable' },
 };
 
 export const RESULT_LABEL = (r: VerificationResult) => RESULT[r].label;

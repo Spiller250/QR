@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Activity, AlertTriangle, ArrowRight, Ban, Boxes, CheckCircle2, FlaskConical, QrCode, ShieldX } from 'lucide-react';
 import type { AuthState, VerificationEvent } from '../../shared/types';
+import { VERIFICATION_RESULTS } from '../../shared/constants';
 import { useOverview } from '../api/hooks';
 import { ActivityChart, SERIES } from '../components/ActivityChart';
 import { AUTH_STATE_META, ResultBadge } from '../components/badges';
@@ -18,6 +19,12 @@ export function ActivityIcon({ e }: { e: VerificationEvent }) {
   if (e.result === 'suspicious')
     return (
       <span className="ico warn">
+        <AlertTriangle size={15} />
+      </span>
+    );
+  if (e.result === 'unreadable')
+    return (
+      <span className="ico neutral">
         <AlertTriangle size={15} />
       </span>
     );
@@ -42,7 +49,7 @@ export function OverviewPage() {
 
   const totalAuth = Object.values(data.authStateBreakdown).reduce((a, b) => a + b, 0) || 1;
   const states: AuthState[] = ['verified', 'not_scanned', 'flagged', 'no_active_label'];
-  const last14 = data.daily.reduce((a, d) => a + d.authentic + d.suspicious + d.invalid + d.revoked, 0);
+  const last14 = data.daily.reduce((a, d) => a + SERIES.reduce((n, s) => n + d[s.key], 0), 0);
 
   return (
     <div className="stack">
@@ -73,7 +80,7 @@ export function OverviewPage() {
         <Stat icon={<Boxes size={17} />} label="Registered products" value={data.totalProducts} foot={`${data.authStateBreakdown.verified} verified at least once`} />
         <Stat icon={<QrCode size={17} />} tone="neutral" label="QR labels issued" value={data.labelsIssued} foot={`${data.activeLabels} active · ${data.labelsIssued - data.activeLabels} revoked`} />
         <Stat icon={<Activity size={17} />} tone="ok" label="Verification attempts" value={data.totalVerifications} foot={`${data.invalidAttempts} invalid · ${data.revokedAttempts} revoked-label attempts`} />
-        <Stat icon={<AlertTriangle size={17} />} tone="warn" label="Suspicious repeat scans" value={data.suspiciousScans} foot={`Across ${data.authStateBreakdown.flagged} flagged product(s)`} />
+        <Stat icon={<AlertTriangle size={17} />} tone="warn" label="Flagged scans" value={data.suspiciousScans} foot={`${data.resultBreakdown.copy_suspected} copy suspected · ${data.authStateBreakdown.flagged} flagged product(s)`} />
       </div>
 
       <div className="grid grid-main-side">
@@ -113,7 +120,7 @@ export function OverviewPage() {
           <div className="mt-16" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <div className="tag">Results, all time</div>
             <div className="row-wrap mt-8">
-              {(['authentic', 'suspicious', 'invalid', 'revoked'] as const).map((r) => (
+              {VERIFICATION_RESULTS.map((r) => (
                 <span key={r} className="row small" style={{ gap: 6 }}>
                   <ResultBadge result={r} /> <span className="strong">{data.resultBreakdown[r]}</span>
                 </span>

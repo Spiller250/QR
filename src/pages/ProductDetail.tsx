@@ -6,7 +6,7 @@ import { useProduct, useTokenAction, useUpdateProduct } from '../api/hooks';
 import { AuthStateBadge, ProductStatusBadge, RepeatBadge, ResultBadge, TokenStatusBadge } from '../components/badges';
 import { EventDetailDrawer } from '../components/EventDetail';
 import { ProductFormModal } from '../components/ProductForm';
-import { QrActions, QrImage } from '../components/qr';
+import { CdpLabelActions, CdpLabelImage } from '../components/cdp';
 import { useToast } from '../components/toast';
 import { Card, ConfirmModal, EmptyState, ErrorState, Field, LoadingBlock } from '../components/ui';
 import { fmtDate, fmtDateTime, fmtRelative } from '../lib/format';
@@ -244,7 +244,7 @@ function LabelPanel({ product }: { product: ProductDetail }) {
         {label?.qrPayload ? (
           <div className="stack" style={{ gap: 16 }}>
             <div className="qr-frame">
-              <QrImage payload={label.qrPayload} alt={`QR label for ${product.name}`} />
+              <CdpLabelImage productId={product.id} version={label.tokenId} alt={`Print label for ${product.name}`} style={{ width: '100%', maxWidth: 240 }} />
             </div>
             <div>
               <div className="tag">Encoded QR payload (plain text, not a URL)</div>
@@ -259,7 +259,7 @@ function LabelPanel({ product }: { product: ProductDetail }) {
               </span>
               <TokenStatusBadge status={label.status} />
             </div>
-            <QrActions product={product} label={label} />
+            <CdpLabelActions productId={product.id} publicId={product.publicId} version={label.tokenId} />
             <div className="row-wrap" style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
               <button className="btn btn-sm" onClick={() => setConfirm('reissue')}>
                 <RefreshCw size={14} /> Reissue token
@@ -283,6 +283,17 @@ function LabelPanel({ product }: { product: ProductDetail }) {
           </EmptyState>
         )}
       </Card>
+      {label?.qrPayload && (
+        <Card title="Copy detection pattern" sub="40 × 40 random cells, 0.15 mm each — derived from the label token">
+          <div className="cdp-zoom">
+            <CdpLabelImage productId={product.id} version={label.tokenId} variant="pattern" alt="Zoomed copy detection pattern" />
+          </div>
+          <p className="small muted mt-12">
+            This pattern sits in the centre of the QR code (about 6 mm square). A first-generation laser print keeps the tiny cells crisp; photocopies, re-prints of a
+            photo and photos of a screen blur or alias them, which lowers the score in <strong>/api/verify-physical</strong>.
+          </p>
+        </Card>
+      )}
       <div className="callout info small">
         <div>
           <strong>Reissue vs. revoke</strong>

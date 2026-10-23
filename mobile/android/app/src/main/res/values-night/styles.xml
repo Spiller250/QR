@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown while the Flutter engine starts (Android < 12). -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:statusBarColor">@color/veriq_navy</item>
+        <item name="android:navigationBarColor">@color/veriq_navy</item>
+    </style>
+    <!-- Behind the Flutter UI after start-up. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/veriq_navy</item>
+    </style>
+</resources>

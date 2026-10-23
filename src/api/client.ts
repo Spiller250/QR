@@ -94,6 +94,28 @@ export const api = {
   verify: <T>(body: unknown) => request<T>('POST', '/verify', { body, headers: APP_KEY ? { 'X-App-Key': APP_KEY } : {} }),
 };
 
+/** Multipart upload (FormData). The browser sets the boundary; the File is sent byte-for-byte. */
+export async function upload<T>(path: string, form: FormData, opts: { appKey?: boolean } = {}): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = session.get();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (opts.appKey && APP_KEY) headers['X-App-Key'] = APP_KEY;
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method: 'POST', headers, body: form });
+  } catch {
+    throw new ApiError(0, 'NETWORK', 'Cannot reach the VERIQ server. Check the Wi-Fi connection and that the server is running.');
+  }
+  const body = (await res.json().catch(() => null)) as (T & ApiErrorBody) | null;
+  if (!res.ok) throw new ApiError(res.status, body?.error?.code ?? 'HTTP_ERROR', body?.error?.message ?? `Request failed (${res.status})`);
+  return body as T;
+}
+
+/** Authenticated DELETE returning JSON. */
+export function del<T>(path: string): Promise<T> {
+  return request<T>('DELETE', path);
+}
+
 /**
  * App key of the built-in web scanner, injected at build time (VITE_APP_KEY).
  * Anything in a web bundle is readable by users — this identifies the client, it is not a secret.

@@ -101,6 +101,29 @@ const MIGRATIONS: { version: number; up: (db: Db) => void }[] = [
       if (!cols.includes('app_client')) db.exec('ALTER TABLE verification_events ADD COLUMN app_client TEXT');
     },
   },
+
+  {
+    // v3: copy-detection (physical) verification results and calibration samples.
+    version: 3,
+    up: (db) => {
+      const cols = db.prepare('PRAGMA table_info(verification_events)').all().map((c) => String(c.name));
+      if (!cols.includes('check_type')) db.exec("ALTER TABLE verification_events ADD COLUMN check_type TEXT NOT NULL DEFAULT 'payload'");
+      if (!cols.includes('cdp_score')) db.exec('ALTER TABLE verification_events ADD COLUMN cdp_score REAL');
+      if (!cols.includes('cdp_threshold')) db.exec('ALTER TABLE verification_events ADD COLUMN cdp_threshold REAL');
+      db.exec(`CREATE TABLE IF NOT EXISTS calibration_samples (
+        id           TEXT PRIMARY KEY,
+        created_at   TEXT NOT NULL,
+        tag          TEXT NOT NULL,
+        note         TEXT,
+        status       TEXT NOT NULL,
+        reason_code  TEXT,
+        score        REAL,
+        product_id   TEXT REFERENCES products(id) ON DELETE SET NULL,
+        components   TEXT NOT NULL DEFAULT '{}',
+        diagnostics  TEXT NOT NULL DEFAULT '{}'
+      )`);
+    },
+  },
 ];
 
 function migrate(db: Db): void {

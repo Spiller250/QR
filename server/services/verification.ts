@@ -1,10 +1,10 @@
 import { RULE_DESCRIPTIONS } from '../../shared/constants';
 import type { RepeatScanRules } from '../../shared/schemas';
 import { parsePayload } from '../../shared/token';
-import type { RuleCode, RuleEvaluation, ScanSource, VerificationResult, VerifyResponse } from '../../shared/types';
+import type { Product, PublicProductInfo, RuleCode, RuleEvaluation, ScanSource, VerificationResult, VerifyResponse } from '../../shared/types';
 import { transaction } from '../db';
 import { fingerprint, hashToken, verifySignature } from '../lib/crypto';
-import type { PriorScan, Store } from '../store';
+import type { PriorScan, Store, TokenRecord } from '../store';
 
 export interface VerifyInput {
   /** Raw QR content, expected `VQ1.<token>.<sig>`. */
@@ -63,7 +63,26 @@ export function evaluateRules(
   ];
 }
 
-const MESSAGES = {
+export type FailureCode = 'LEGACY_FORMAT' | 'MALFORMED_TOKEN' | 'BAD_SIGNATURE' | 'TOKEN_NOT_FOUND' | 'TOKEN_REVOKED';
+
+/** Outcome of checking a payload against format, signature and registry — without recording anything. */
+export type Inspection =
+  | { ok: false; reasonCode: FailureCode; fingerprint: string; productId: string | null; tokenId: string | null }
+  | { ok: true; token: TokenRecord; product: Product; fingerprint: string };
+
+export function publicProduct(product: Product): PublicProductInfo {
+  return {
+    publicId: product.publicId,
+    name: product.name,
+    manufacturer: product.manufacturer,
+    category: product.category,
+    batchNumber: product.batchNumber,
+    productionDate: product.productionDate,
+    status: product.status,
+  };
+}
+
+export const MESSAGES = {
   MALFORMED_TOKEN: 'The scanned code is not a valid VERIQ verification code. It may be damaged, modified or not issued by VERIQ.',
   LEGACY_FORMAT: 'This label uses a retired URL format that is no longer accepted. Please contact the brand owner for a replacement label.',
   BAD_SIGNATURE: 'The code failed the signature check. It has been modified or forged and was not issued by VERIQ.',
@@ -78,18 +97,42 @@ const MESSAGES = {
 } as const;
 
 export function createVerificationService(store: Store, secrets: { tokenHashSecret: string; qrSigningSecret: string }) {
+  /**
+   * Format → constant-time signature check → registry lookup → label status. The signature is
+   * verified before any database access, so forged payloads never touch the token table.
+   */
+  function inspect(payload: string): Inspection {
+    const parsed = parsePayload(payload);
+    // Lookup key for vq1 payloads; for anything else, a fingerprint of the raw input (never stored itself).
+    const tokenHash = hashToken(parsed.kind === 'vq1' ? parsed.token : payload.trim(), secrets.tokenHashSecret);
+    const fp = fingerprint(tokenHash);
+    const fail = (reasonCode: FailureCode, productId: string | null = null, tokenId: string | null = null): Inspection => ({
+      ok: false,
+      reasonCode,
+      fingerprint: fp,
+      productId,
+      tokenId,
+    });
+    if (parsed.kind === 'legacy_url') return fail('LEGACY_FORMAT');
+    if (parsed.kind !== 'vq1') return fail('MALFORMED_TOKEN');
+    if (!verifySignature(parsed.token, parsed.signature, secrets.qrSigningSecret)) return fail('BAD_SIGNATURE');
+    const token = store.findTokenByHash(tokenHash);
+    if (!token) return fail('TOKEN_NOT_FOUND');
+    if (token.status !== 'active') return fail('TOKEN_REVOKED', token.productId, token.id);
+    const product = store.getProduct(token.productId);
+    if (!product) return fail('TOKEN_NOT_FOUND');
+    return { ok: true, token, product, fingerprint: fp };
+  }
+
   function verify(input: VerifyInput): VerifyResponse {
     const at = input.now ?? new Date();
     const checkedAt = at.toISOString();
-    const parsed = parsePayload(input.payload);
-    // Lookup key for vq1 payloads; for anything else, a fingerprint of the raw input (never stored itself).
-    const tokenHash = hashToken(parsed.kind === 'vq1' ? parsed.token : input.payload.trim(), secrets.tokenHashSecret);
     const scannerId = input.scannerId?.trim() || 'UNREGISTERED';
     const location = input.location?.trim() || null;
     const source: ScanSource = input.source ?? 'manual';
     const base = {
       createdAt: checkedAt,
-      tokenFingerprint: fingerprint(tokenHash),
+      tokenFingerprint: '',
       scannerId,
       location,
       source,
@@ -98,6 +141,8 @@ export function createVerificationService(store: Store, secrets: { tokenHashSecr
     };
 
     return transaction(store.raw, () => {
+      const check = inspect(input.payload);
+      base.tokenFingerprint = check.fingerprint;
       const fail = (result: VerificationResult, reasonCode: keyof typeof MESSAGES, productId: string | null, tokenId: string | null): VerifyResponse => {
         const eventId = store.insertEvent({
           ...base,
@@ -115,17 +160,8 @@ export function createVerificationService(store: Store, secrets: { tokenHashSecr
         return { eventId, checkedAt, result, reasonCode, message: MESSAGES[reasonCode], product: null, scan: null };
       };
 
-      if (parsed.kind === 'legacy_url') return fail('invalid', 'LEGACY_FORMAT', null, null);
-      if (parsed.kind !== 'vq1') return fail('invalid', 'MALFORMED_TOKEN', null, null);
-      // Signature is checked (constant time) before any registry lookup, so forged payloads never touch the token table.
-      if (!verifySignature(parsed.token, parsed.signature, secrets.qrSigningSecret)) return fail('invalid', 'BAD_SIGNATURE', null, null);
-
-      const token = store.findTokenByHash(tokenHash);
-      if (!token) return fail('invalid', 'TOKEN_NOT_FOUND', null, null);
-      if (token.status !== 'active') return fail('revoked', 'TOKEN_REVOKED', token.productId, token.id);
-
-      const product = store.getProduct(token.productId);
-      if (!product) return fail('invalid', 'TOKEN_NOT_FOUND', null, null);
+      if (!check.ok) return fail(check.reasonCode === 'TOKEN_REVOKED' ? 'revoked' : 'invalid', check.reasonCode, check.productId, check.tokenId);
+      const { token, product } = check;
 
       const prior = store.priorScans(token.id);
       const rules = evaluateRules(store.getRules(), prior, { scannerId, location, at });
@@ -159,15 +195,7 @@ export function createVerificationService(store: Store, secrets: { tokenHashSecr
         result,
         reasonCode,
         message: MESSAGES[reasonCode],
-        product: {
-          publicId: product.publicId,
-          name: product.name,
-          manufacturer: product.manufacturer,
-          category: product.category,
-          batchNumber: product.batchNumber,
-          productionDate: product.productionDate,
-          status: product.status,
-        },
+        product: publicProduct(product),
         scan: {
           scanNumber,
           repeatScan,
@@ -180,7 +208,7 @@ export function createVerificationService(store: Store, secrets: { tokenHashSecr
     });
   }
 
-  return { verify };
+  return { verify, inspect };
 }
 
 export type VerificationService = ReturnType<typeof createVerificationService>;

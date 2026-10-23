@@ -4,8 +4,12 @@
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+// Set CDP_PHOTOS=<dir> to enable copy-detection steps (needs cdp-service running). Photos of the
+// demo product's *current* label are generated there by scripts/cdp-smoke.ts during the run.
+const CDP_PHOTOS = process.env.CDP_PHOTOS;
 const OUT = process.argv[2] ?? 'e2e-screenshots';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -32,7 +36,7 @@ try {
   await page.getByRole('heading', { name: 'Overview' }).waitFor();
   await page.locator('.stat-value').first().waitFor();
   const attemptsBefore = await statValue('Verification attempts');
-  const suspiciousBefore = await statValue('Suspicious repeat scans');
+  const suspiciousBefore = await statValue('Flagged scans');
   await shot('02-overview');
 
   step('Product form validation + create product');
@@ -61,8 +65,8 @@ try {
 
   step('Print label preview');
   await page.goto(productUrl);
-  await page.getByRole('button', { name: 'Print label' }).click();
-  await page.getByText('Print-ready label').waitFor();
+  await page.getByRole('button', { name: 'Print', exact: true }).click();
+  await page.getByText('Print label at actual size').waitFor();
   await shot('05-print-label', false);
   await page.keyboard.press('Escape');
 
@@ -117,7 +121,7 @@ try {
   await page.goto(`${BASE}/`);
   await page.locator('.stat-value').first().waitFor();
   const attemptsAfter = await statValue('Verification attempts');
-  const suspiciousAfter = await statValue('Suspicious repeat scans');
+  const suspiciousAfter = await statValue('Flagged scans');
   if (attemptsAfter < attemptsBefore + 10) throw new Error(`Attempts did not increase enough: ${attemptsBefore} → ${attemptsAfter}`);
   if (suspiciousAfter <= suspiciousBefore) throw new Error(`Suspicious count did not increase: ${suspiciousBefore} → ${suspiciousAfter}`);
   console.log(`  attempts ${attemptsBefore} → ${attemptsAfter}, suspicious ${suspiciousBefore} → ${suspiciousAfter}`);
@@ -138,8 +142,63 @@ try {
   await page.getByRole('heading', { name: 'Scan this label with the official VERIQ app' }).waitFor();
   await shot('13-legacy-url', false);
 
+  if (CDP_PHOTOS) {
+    const photo = (n) => path.join(CDP_PHOTOS, `${n}.jpg`);
+    step('Full-chain CDP smoke (Express → Python) on the current demo label');
+    const smoke = execSync(`npx tsx scripts/cdp-smoke.ts "${CDP_PHOTOS}"`, { encoding: 'utf8' });
+    console.log(
+      smoke
+        .split(/\r?\n/)
+        .filter((l) => /PASS|FAIL/.test(l))
+        .map((l) => `  ${l}`)
+        .join('\n'),
+    );
+
+    step('CDP label: vector SVG, zoomed pattern and print PDF');
+    await page.goto(`${BASE}/products`);
+    await page.locator('table.table tbody tr').first().click();
+    await page.getByRole('heading', { name: 'Copy detection pattern' }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll('.qr-frame img, .cdp-zoom img')].every((i) => i.complete && i.naturalWidth > 0));
+    const [pdf] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download print PDF' }).click()]);
+    if (!/.pdf$/.test(pdf.suggestedFilename())) throw new Error('PDF download has an unexpected name');
+    await shot('17-cdp-label');
+
+    step('Calibration: tagged uploads, histogram and suggested threshold');
+    await page.goto(`${BASE}/calibration`);
+    await page.getByRole('heading', { name: 'Calibration', exact: true }).waitFor();
+    if (await page.getByRole('button', { name: 'Clear all' }).count()) {
+      await page.getByRole('button', { name: 'Clear all' }).click();
+      await page.getByRole('button', { name: 'Delete all' }).click();
+    }
+    const calInput = page.locator('input[type=file]');
+    for (const [tag, file] of [['Original print', 'original'], ['Photocopy / re-print', 'photocopy'], ['Photo of a screen', 'screen']]) {
+      await page.getByRole('radio', { name: tag }).click();
+      await calInput.setInputFiles(photo(file));
+      await page.getByRole('button', { name: 'Choose photos' }).waitFor({ timeout: 30_000 });
+    }
+    await page.getByText(/Suggested: midway between/).waitFor({ timeout: 30_000 });
+    await shot('18-calibration');
+
+    step('Phone capture page: original, photocopy, blurry');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${BASE}/scan-physical`);
+    const camera = page.locator('input[type=file][capture]');
+    await shot('m7-scan-start');
+    for (const [file, title, name] of [['original', 'Original product', 'm8-scan-original'], ['photocopy', 'Copy suspected', 'm9-scan-copy'], ['blurry', 'Retake photo', 'm10-scan-retake']]) {
+      await camera.setInputFiles(photo(file));
+      await page.getByRole('heading', { name: title }).waitFor({ timeout: 30_000 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      if (overflow > 0) throw new Error(`/scan-physical overflows by ${overflow}px`);
+      await shot(name);
+      await page.getByRole('button', { name: 'Scan again' }).click();
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  } else {
+    console.log('  (CDP steps skipped — set CDP_PHOTOS to a folder produced by scripts/cdp-smoke.ts)');
+  }
+
   step('Other pages render');
-  for (const [p, name] of [['/qr-codes', '14-qr-codes'], ['/security', '15-security'], ['/settings', '16-settings']]) {
+  for (const [p, name] of [['/qr-codes', '14-qr-codes'], ['/security', '15-security'], ['/settings', '16-settings'], ['/demo?tab=scanner', '19-demo-scanner']]) {
     await page.goto(`${BASE}${p}`);
     await page.locator('.page-head h1').waitFor();
     await page.waitForLoadState('networkidle');

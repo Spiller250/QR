@@ -52,6 +52,16 @@ export function EventDetailDrawer({ event, onClose }: { event: VerificationEvent
           <dd className="mono">{event.appClient ?? '—'}</dd>
           <dt>Source</dt>
           <dd>{sourceLabel(event.source)}</dd>
+          <dt>Check type</dt>
+          <dd>{event.checkType === 'physical' ? 'Photo + copy-detection pattern' : 'QR payload'}</dd>
+          {event.checkType === 'physical' && (
+            <>
+              <dt>CDP score</dt>
+              <dd>
+                {event.cdpScore !== null ? event.cdpScore.toFixed(3) : '—'} (threshold {event.cdpThreshold?.toFixed(2) ?? '—'})
+              </dd>
+            </>
+          )}
           <dt>Scan number</dt>
           <dd>{event.scanNumber ?? '—'}</dd>
           <dt>Token fingerprint</dt>

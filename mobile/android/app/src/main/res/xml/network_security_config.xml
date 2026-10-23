@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEMO ONLY: permits plain HTTP so the phone can reach the VERIQ server on the local Wi-Fi
+  (Android blocks cleartext traffic by default since API 28). Android cannot scope this to
+  "any LAN IP", so it is enabled globally.
+
+  Production: serve the API over HTTPS, delete this file and the
+  android:networkSecurityConfig attribute in AndroidManifest.xml (or set
+  cleartextTrafficPermitted="false").
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

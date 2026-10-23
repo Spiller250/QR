@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Database, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
+import { Database, Fingerprint, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
 import { RULE_DESCRIPTIONS } from '../../shared/constants';
 import { DEFAULT_RULES, rulesSchema, type RepeatScanRules } from '../../shared/schemas';
 import type { RuleCode } from '../../shared/types';
-import { useResetDemo, useSaveRules, useSettings } from '../api/hooks';
+import { useResetDemo, useSaveCdpThreshold, useSaveRules, useSettings } from '../api/hooks';
+import type { SettingsPayload } from '../../shared/types';
+import { Link } from 'react-router-dom';
 import { useToast } from '../components/toast';
 import { Card, ConfirmModal, ErrorState, LoadingBlock, PageHead, Spinner } from '../components/ui';
 import { useAuth } from '../lib/auth';
@@ -117,6 +119,8 @@ export function SettingsPage() {
         </div>
       </Card>
 
+      <CdpSettingsCard settings={data} />
+
       <div className="grid grid-2">
         <Card
           title={
@@ -180,5 +184,64 @@ export function SettingsPage() {
         />
       )}
     </div>
+  );
+}
+
+function CdpSettingsCard({ settings }: { settings: SettingsPayload }) {
+  const cdp = settings.cdp;
+  const save = useSaveCdpThreshold();
+  const toast = useToast();
+  const [value, setValue] = useState(cdp.threshold.toFixed(2));
+  useEffect(() => setValue(cdp.threshold.toFixed(2)), [cdp.threshold]);
+  const parsed = Number(value);
+  const valid = value.trim() !== '' && Number.isFinite(parsed) && parsed >= 0 && parsed <= 1;
+
+  return (
+    <Card
+      title={
+        <span className="row" style={{ gap: 8 }}>
+          <Fingerprint size={16} /> Copy detection (physical labels)
+        </span>
+      }
+      sub="Photos scored at or above the threshold are reported as Original; below it, Copy suspected."
+      footer={
+        <>
+          <span className="small">
+            Default from <code>CDP_THRESHOLD</code>: {cdp.defaultThreshold.toFixed(2)} · <Link to="/calibration">Calibrate with real photos</Link>
+          </span>
+          <button
+            className="btn btn-primary"
+            disabled={!valid || save.isPending || Math.abs(parsed - cdp.threshold) < 0.0005}
+            onClick={async () => {
+              await save.mutateAsync(parsed);
+              toast({ tone: 'success', title: 'Threshold saved', body: `Physical checks now use ${parsed.toFixed(2)}.` });
+            }}
+          >
+            {save.isPending ? <Spinner light /> : <Save size={15} />} Save threshold
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-2">
+        <div className="field">
+          <label htmlFor="cdp-threshold">Decision threshold (0–1)</label>
+          <input id="cdp-threshold" className={`input${valid ? '' : ' error'}`} type="number" min={0} max={1} step={0.01} value={value} onChange={(e) => setValue(e.target.value)} style={{ maxWidth: 160 }} />
+          <span className="hint">Set it between the scores of your original prints and your copies.</span>
+        </div>
+        <dl className="dl">
+          <dt>Analysis service</dt>
+          <dd>
+            {cdp.serviceOnline ? <span className="badge badge-success">online</span> : <span className="badge badge-danger">offline</span>}{' '}
+            <span className="mono small">{cdp.serviceUrl}</span>
+          </dd>
+          <dt>Pattern</dt>
+          <dd>
+            {cdp.gridSize} × {cdp.gridSize} cells · {cdp.cellMm} mm · {cdp.patternMm.toFixed(1)} mm square
+          </dd>
+          <dt>QR size</dt>
+          <dd>{cdp.qrMm} mm (error correction H)</dd>
+        </dl>
+      </div>
+    </Card>
   );
 }

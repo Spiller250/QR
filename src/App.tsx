@@ -12,6 +12,8 @@ import { LiveDemoPage } from './pages/LiveDemo';
 import { SecurityPage } from './pages/Security';
 import { SettingsPage } from './pages/Settings';
 import { LegacyLabelPage } from './pages/LegacyLabel';
+import { ScanPhysicalPage } from './pages/ScanPhysical';
+import { CalibrationPage } from './pages/Calibration';
 import { NotFoundPage } from './pages/NotFound';
 
 function RequireOperator() {
@@ -28,6 +30,8 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       {/* Retired URL-format labels (…/v/<token>) land here. Nothing is verified on this page. */}
       <Route path="/v/*" element={<LegacyLabelPage />} />
+      {/* Phone capture page for physical (copy-detection) checks. Authenticates as the web-scanner app. */}
+      <Route path="/scan-physical" element={<ScanPhysicalPage />} />
       <Route element={<RequireOperator />}>
         <Route index element={<OverviewPage />} />
         <Route path="products" element={<ProductsPage />} />
@@ -35,6 +39,7 @@ export function App() {
         <Route path="qr-codes" element={<QrCodesPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="demo" element={<LiveDemoPage />} />
+        <Route path="calibration" element={<CalibrationPage />} />
         <Route path="security" element={<SecurityPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />

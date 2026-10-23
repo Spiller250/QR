@@ -19,11 +19,13 @@ export function resultTitle(r: VerifyResponse): string {
   }
 }
 
-const ICON = {
+const ICON: Record<VerifyResponse['result'], typeof CheckCircle2> = {
   authentic: CheckCircle2,
   suspicious: AlertTriangle,
   invalid: ShieldX,
   revoked: Ban,
+  copy_suspected: ShieldX,
+  unreadable: AlertTriangle,
 };
 
 export function ResultHero({ response }: { response: VerifyResponse }) {

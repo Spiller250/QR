@@ -7,6 +7,7 @@ A working proof of concept for QR-based product authentication. It includes:
 - A verification API that answers **only authorized client applications**
 - Scan history and repeat-scan detection
 - An interactive simulator that shows what a QR-based system **can** and **cannot** prove
+- A **Copy Detection Pattern (CDP)**: a microscopic random pattern printed inside each QR code. A Python/OpenCV service scores phone photos so that the original printed label passes while photocopies, re-prints of photos and photos of screens are flagged — see [Physical label verification](#physical-label-verification-copy-detection-pattern)
 
 > **All brands, products and scan events are fictional demonstration data.** Operator authentication is demo-only (see [Limitations](#limitations)).
 
@@ -16,13 +17,19 @@ Mobile developers: see **[docs/API_FOR_MOBILE.md](docs/API_FOR_MOBILE.md)** for 
 
 ## Quick start
 
-Requirements: **Node.js 22.13+**. It uses the built-in `node:sqlite` module, so nothing native needs compiling. Tested on Node 24.
+Requirements: **Node.js 22.13+** (uses the built-in `node:sqlite`, nothing native to compile; tested on Node 24) and, for physical label checks, **Python 3.11+** (tested on 3.13).
 
-```bash
+```powershell
+# Terminal 1 — copy-detection analysis service (creates cdp-service.venv on first run)
+powershell -ExecutionPolicy Bypass -File cdp-serviceun-cdp.ps1      # http://127.0.0.1:8100
+
+# Terminal 2 — API + dashboard
 npm install
-cp .env.example .env        # demo defaults; generate real secrets/keys for anything shared
-npm run dev                 # API on :4000, web app on :5173
+copy .env.example .env      # demo defaults; generate real secrets/keys for anything shared
+npm run dev                 # API on :4000, web app on :5173   (npm run dev:lan to allow phones on the Wi-Fi)
 ```
+
+The dashboard works without the Python service; only `/api/verify-physical` and Calibration need it (they return `503 CDP_SERVICE_UNAVAILABLE` otherwise).
 
 Open **http://localhost:5173** and sign in with the pre-filled demo operator:
 
@@ -39,12 +46,15 @@ The database is created at `data/veriq.db` and seeded on first start. Existing d
 | Command | Purpose |
 |---|---|
 | `npm run dev` | API (tsx watch) + Vite dev server with `/api` proxy |
+| `npm run dev:lan` | Same, but the web app also listens on your LAN IP so a phone on the same Wi-Fi can open `/scan-physical` |
+| `npm run cdp` / `npm run cdp:test` | Start the Python CDP service / run its pytest suite (both via `cdp-serviceun-cdp.ps1`) |
+| `npx tsx scripts/cdp-smoke.ts [dir]` | Full-chain check with both services running: renders the demo product's real label, simulates original / photocopy / screen / blurry photos and uploads them to `/api/verify-physical` |
 | `npm run build` | Type-check client and server, build the SPA to `dist/` |
 | `npm start` | Production mode: API also serves `dist/` on `:4000` |
 | `npm run reset` | Wipe and re-seed the demo data (also available in **Settings → Reset demo data**) |
 | `npm run typecheck` / `npm run lint` / `npm test` | Static checks and the Vitest suite (rules, payload signing, app keys, migration, API flows) |
 | `npm run check` | All three of the above |
-| `node scripts/e2e-smoke.mjs [dir]` | Browser end-to-end smoke test against a running `npm run dev` (uses installed Edge/Chrome via `playwright-core`; `E2E_CHANNEL=chrome` to switch) |
+| `node scripts/e2e-smoke.mjs [dir]` | Browser end-to-end smoke test against a running `npm run dev` (uses installed Edge/Chrome via `playwright-core`; `E2E_CHANNEL=chrome` to switch). Set `CDP_PHOTOS=<dir>` with the CDP service running to include label PDF, calibration and phone-capture steps |
 
 ### Scanning a real label
 
@@ -75,6 +85,9 @@ Labels contain `VQ1.<token>.<signature>` as **plain text**. A phone's regular ca
 │  db.ts  SQLite (node:sqlite), WAL, versioned migrations                      │
 └──────────────────────────────────────────────────────────────────────────────┘
 shared/  types, constants, Zod schemas, payload parser (token.ts) for client + server
+
+Phone (/scan-physical) ── POST /api/verify-physical (photo, X-App-Key) ──► Express
+   Express ── /decode, /analyze (multipart, localhost only) ──► cdp-service (FastAPI + OpenCV, :8100)
 ```
 
 | Folder | Contents |
@@ -84,6 +97,7 @@ shared/  types, constants, Zod schemas, payload parser (token.ts) for client + s
 | `src/` | `api/` (fetch client + React Query hooks), `components/` (UI kit, QR/label, chart, demo simulator, scanner), `pages/`, `styles/global.css`. |
 | `tests/` | Vitest: rule engine and payload parsing, signing and app-key tests, a migration test, and supertest API flows. |
 | `docs/` | `API_FOR_MOBILE.md`, the integration guide for the Flutter developer. |
+| `cdp-service/` | Python copy-detection service: `app/analysis.py` (QR detection, rectification, scoring), `app/main.py` (FastAPI), `tests/` (synthetic print/copy/screen tests), `tools/simulate_captures.py`, `run-cdp.ps1`. |
 | `scripts/` | Browser end-to-end smoke test. |
 
 ### Key design decisions
@@ -129,7 +143,11 @@ shared/  types, constants, Zod schemas, payload parser (token.ts) for client + s
 | `APP_KEYS` | `web-scanner:dev-web-scanner-key,flutter-app:dev-flutter-app-key` | Authorized verification clients as `client-id:key,…` (keys ≥ 12 chars). Empty means every verify call is rejected. |
 | `VITE_APP_KEY` | `dev-web-scanner-key` | Key the built-in web scanner sends. Exposed in the browser bundle; must match the `web-scanner` entry. |
 | `DATABASE_PATH` | `./data/veriq.db` | SQLite file |
-| `VERIFY_RATE_LIMIT_PER_MINUTE` | `60` | Per-IP limit on `/api/verify` (login is fixed at 10/min) |
+| `VERIFY_RATE_LIMIT_PER_MINUTE` | `60` | Per-IP limit on `/api/verify` and `/api/verify-physical` (login is fixed at 10/min) |
+| `CDP_SECRET` | dev default (warns) | HMAC key deriving each label's copy-detection pattern. **Changing it invalidates every printed pattern.** |
+| `CDP_SERVICE_URL` | `http://127.0.0.1:8100` | Internal Python analysis service |
+| `CDP_THRESHOLD` | `0.6` | Default decision threshold (Settings/Calibration override it; stored in SQLite) |
+| `CDP_GRID_SIZE` / `CDP_CELL_MM` / `LABEL_QR_MM` | `40` / `0.15` / `30` | Pattern cells per side, cell size and printed QR size. The overlay must stay ≤ 12% of the QR area (startup error otherwise). Re-print labels after changing. |
 
 Generate secrets and keys with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. `.env` and `data/*.db` are git-ignored.
 
@@ -180,6 +198,31 @@ X-App-Key: <client key>
 
 More examples, including `BAD_SIGNATURE` and `401`, are in [docs/API_FOR_MOBILE.md](docs/API_FOR_MOBILE.md).
 
+**`POST /api/verify-physical`** (requires `X-App-Key`; rate-limited; needs the CDP service)
+
+`multipart/form-data` with `image` (the original JPEG/PNG from the camera, ≤ 20 MB) and optional `scannerId`, `location`, `source`. Flow: decode QR from the photo (Python) → same VQ1 signature/registry checks as `/api/verify` → CDP score (Python) → threshold → logged event (`checkType: "physical"`, score and threshold stored).
+
+```json
+{
+  "eventId": "evt_…", "checkedAt": "…", "result": "authentic", "reasonCode": "CDP_MATCH",
+  "message": "Original label: the copy-detection pattern matches a first-generation print.",
+  "score": 0.94, "threshold": 0.6,
+  "product": { "publicId": "VQ-…", "name": "Meridian Chronograph 42 mm", "…": "…" },
+  "scan": { "scanNumber": 3, "repeatScan": true, "rulesTriggered": [] },
+  "components": { "cellCorrelation": 0.98, "pixelCorrelation": 0.89, "isolatedContrast": 0.87, "hfScore": 1, "…": 0 },
+  "diagnostics": { "pixelsPerCell": 4.6, "blurCells": 0.62, "sharpness": 0.77, "imageWidth": 4000, "imageHeight": 3000, "bytes": 3145728 }
+}
+```
+
+| `result` | `reasonCode` | Product disclosed |
+|---|---|---|
+| `authentic` | `CDP_MATCH` (score ≥ threshold) | yes |
+| `copy_suspected` | `CDP_DEGRADED` (score < threshold) | yes (the token is genuine; the physical label is not) |
+| `unreadable` | `NO_QR_FOUND`, `CAPTURE_TOO_BLURRY`, `CAPTURE_TOO_FAR`, `UNSUPPORTED_IMAGE`, `PAYLOAD_MISMATCH` — retake the photo; no score | no |
+| `invalid` | `BAD_SIGNATURE`, `MALFORMED_TOKEN`, `LEGACY_FORMAT`, `TOKEN_NOT_FOUND`, `TOKEN_REVOKED` | no |
+
+Errors: `400 IMAGE_REQUIRED`, `413 IMAGE_TOO_LARGE`, `401 APP_KEY_*`, `503 CDP_SERVICE_UNAVAILABLE`.
+
 **Auth:** `POST /api/auth/login` `{ email, password }` → `{ token, operator, expiresInSeconds }` · `GET /api/auth/me` · `POST /api/auth/logout`
 
 ### Operator (Bearer session)
@@ -198,7 +241,11 @@ More examples, including `BAD_SIGNATURE` and `401`, are in [docs/API_FOR_MOBILE.
 | `GET /api/verification-logs/:id` | Single event |
 | `GET /api/verification-logs/export.csv?…` | CSV export with the same filters, incl. `app_client` (formula-injection safe) |
 | `GET /api/stats/overview` | Dashboard counters, 14-day series, recent events |
-| `GET /api/settings` · `PUT /api/settings/rules` | Rules, payload format and authorized client IDs (never keys) |
+| `GET /api/settings` · `PUT /api/settings/rules` | Rules, payload format, authorized client IDs (never keys), CDP settings + service status, LAN addresses |
+| `PUT /api/settings/cdp` | `{ threshold: 0..1 }` — CDP decision threshold |
+| `GET /api/products/:id/label.svg[?variant=pattern]` | Print-ready vector label (QR + CDP) at exact mm size, or a zoomed pattern view |
+| `GET /api/products/:id/label.pdf` | A4 sheet: label at 100%, 10 mm calibration ruler, print instructions |
+| `GET /api/calibration/samples` · `POST` (multipart `image` + `tag` = `original|photocopy|screen`) · `DELETE /:id` · `DELETE` | Calibration samples (scores/diagnostics only) + suggested threshold |
 | `POST /api/admin/reset-demo` | Wipe and re-seed demo data |
 
 Example: create a product, then verify its label as the Flutter app.
@@ -217,6 +264,125 @@ curl -s localhost:4000/api/verify -H 'Content-Type: application/json' -H "X-App-
 
 ---
 
+## Physical label verification (Copy Detection Pattern)
+
+### How it works
+
+1. **Pattern.** Each label gets a 40 × 40 random binary grid derived from `HMAC-SHA256(CDP_SECRET, token)`. Nothing is stored; the grid is regenerated from the token. At 0.15 mm per cell the pattern is 6 mm square.
+2. **Embedding.** The QR code is generated with error correction **H**. The centre is cleared (11 × 11 modules for the 30 mm, 37-module code, i.e. **8.8 %** of the symbol, under the 12 % limit) and the pattern is drawn there with a one-module white border. The code still decodes because level H tolerates ~30 % damage.
+3. **Printing.** The dashboard renders the label as vector SVG/PDF (every module and cell is a `<rect>`, `crispEdges`) at exact physical size.
+4. **Analysis** (`cdp-service`, FastAPI + OpenCV):
+   - **Find the code.** Detect the QR (OpenCV, falling back to WeChat) and use its four corners to compute a homography.
+   - **Rectify.** Resample the centre to 8 px per cell, normalise local illumination, then align the expected template (sub-module translation and scale search, plus 90° rotations).
+   - **Score** (0..1), as `cellCorrelation × (0.5·isolatedContrast + 0.3·pixelCorrelation + 0.2·hfScore)`:
+     - **cellCorrelation:** per-cell correlation with the template, which gates the score (a wrong or missing pattern gives about 0).
+     - **pixelCorrelation:** sub-cell correlation, i.e. edge fidelity.
+     - **isolatedContrast:** contrast of isolated cells relative to cells in uniform blocks. Copying smears single cells first.
+     - **hfScore:** high-frequency (Laplacian) energy of the pattern relative to the QR modules.
+   - **Gate on capture quality:** too blurry (edge spread > 1.35 cells) or too far (< 2.2 px per cell) returns `unreadable` instead of a guess.
+5. **Decision** in Express: `score ≥ threshold` → **Original**, otherwise **Copy suspected**. The threshold defaults to `CDP_THRESHOLD` and is tuned on the Calibration page.
+
+On synthetic tests (`cdp-service/tests`) originals score ~0.92–0.99, simulated photocopies ~0.25–0.32 and screen photos ~0.22. Real-world numbers depend on your printer and phone. **Calibrate before the demo.**
+
+### Run both services on Windows
+
+```powershell
+# Terminal 1 (from the repo root)
+powershell -ExecutionPolicy Bypass -File cdp-service\run-cdp.ps1          # add -Test to run pytest
+# Terminal 2
+npm run dev:lan
+```
+
+Check: open http://localhost:8100/health (Python) and **Settings → Copy detection** (shows "online").
+
+### Open the scan page from a phone (same Wi-Fi)
+
+1. Find the PC's Wi-Fi IP: `ipconfig` → "Wireless LAN adapter Wi-Fi → IPv4 Address" (e.g. `192.168.1.20`). **Live Demo → Authorized scanner** also shows the link and a QR code for it.
+2. On the phone open **http://192.168.1.20:5173/scan-physical**.
+3. If it does not load, allow Node.js through Windows Defender Firewall for **Private** networks (Windows asks on first run of `npm run dev:lan`), and make sure the Wi-Fi profile is set to *Private*.
+
+The page uses `<input type="file" accept="image/*" capture="environment">`, so it works over plain HTTP (no camera-permission API) and uploads the original full-resolution file without resizing.
+
+### Printing
+
+- Product page → **Download print PDF** → print at **100 % / Actual size** (disable "Fit to page"), **laser printer**, highest quality, plain white paper or matte label stock.
+- Measure the **10 mm ruler** on the printout; if it is not exactly 10 mm, the print was scaled.
+- Avoid inkjet on plain paper (ink bleed blurs the 0.15 mm cells). Do not print from a photo or screenshot of the label.
+
+### Calibration (do this before recording)
+
+1. Print 1–2 labels as above. Make a **photocopy** of the printed label (or scan and re-print it), and display the label PDF on a **monitor or second phone**.
+2. With the demo phone, take 5+ photos of each, following the capture tips (8–12 cm, centred, tap to focus, no glare).
+3. **Calibration** page → choose the tag (*Original print / Photocopy / Photo of a screen*) → upload the photos (send them to the PC unmodified, e.g. via USB or cloud drive in "original quality"; messengers recompress).
+4. Check the histogram. If originals and copies are clearly separated, click **Apply suggested threshold** (midway between the lowest original and highest copy). If they overlap, improve print quality and capture distance first.
+5. Samples are stored in SQLite (scores only). Unreadable photos have no score; the reason is shown in the table. Only labels that are currently active can be calibrated, so don't reissue the label you printed.
+
+### Honest limitations
+
+- **Not 100 % copy-proof.** A basic CDP raises the cost of copying; a skilled forger with high-resolution scanning and printing may produce copies that score well. Error rates have not been measured on a large real dataset.
+- Requires **consistent high-quality printing** and **sharp close-up photos**. Poor prints lower original scores (false "copy suspected"); poor captures return "Retake photo".
+- The threshold is specific to your printer/paper/phone combination. Recalibrate when any of them changes.
+- For the strongest protection use **secure NFC tags** with cryptographic challenge–response; they cannot be copied by imaging.
+
+## Mobile app
+
+`mobile/` is the **VERIQ Scanner** Flutter app for Android (package `com.veriq.scanner`). It captures a **full-resolution still** with the `camera` package (`ResolutionPreset.max`, back camera, tap-to-focus, flash toggle off by default, square guide "Fit the QR inside the frame, 8–12 cm away"). It uploads the JPEG **unmodified** to `POST /api/verify-physical` with `X-App-Key` and a per-install `scannerId` (UUID), then shows **Original product / Copy suspected / Retake photo / Invalid code** with score vs threshold. History keeps the last 50 scans on the phone. Settings holds the server URL and a masked app key, plus a *Test connection* button.
+
+| Folder | Contents |
+|---|---|
+| `mobile/lib/api/` | `veriq_api.dart` (multipart upload, 30 s timeout, connection test), `api_error.dart` (error mapping: no connection, timeout, 401 key rejected, 503 analysis down, …) |
+| `mobile/lib/models/` | `VerifyResult` parsing, `HistoryEntry`, `AppSettings` (URL normalisation, key masking) |
+| `mobile/lib/screens/` | Scan (camera), Result, History, Settings |
+| `mobile/lib/widgets/` | Result card, scan overlay, brand mark |
+| `mobile/lib/services/` | SharedPreferences-backed settings (incl. scanner UUID) and history |
+| `mobile/test/` | Result parsing, error mapping, API client against a mock HTTP client (verifies multipart, header, unmodified bytes), stores, result widgets |
+| `mobile/android/` | Committed customisations only: manifest (CAMERA + INTERNET), cleartext config, icons, splash, `MainActivity`. Gradle files come from `tool/setup.ps1`. |
+
+### Prerequisites (Windows)
+
+- Flutter SDK (stable) on `PATH`, and the Android SDK (Android Studio or the command-line tools). Accept the licenses with `flutter doctor --android-licenses`. `flutter doctor` must show the Android toolchain without errors.
+- On the phone: Developer options → **USB debugging** on, then accept the PC's RSA prompt. `flutter devices` lists the phone.
+- Phone and PC on the **same Wi-Fi**. Allow the API port through the firewall (admin PowerShell, once):
+  `New-NetFirewallRule -DisplayName "VERIQ API 4000" -Direction Inbound -Protocol TCP -LocalPort 4000 -Action Allow -Profile Private`
+- The VERIQ API (`npm run dev`) and the CDP service (`cdp-service\run-cdp.ps1`) running on the PC. The app talks to the API directly on port **4000**.
+
+### First-time setup
+
+```powershell
+cd mobile
+powershell -ExecutionPolicy Bypass -File tool\setup.ps1
+```
+
+The script runs `flutter create` for Android (generates Gradle files for *your* Flutter version without overwriting the committed files), sets `applicationId`/`namespace` to `com.veriq.scanner` and `minSdk = 23`, runs `flutter pub get`, `flutter analyze` and `flutter test`.
+
+### (a) Run on the connected phone
+
+```powershell
+cd mobile
+# PC Wi-Fi IP and the flutter-app key from ..\.env (never typed into a file in the repo)
+$ip  = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias 'Wi-Fi').IPAddress
+$key = ((Select-String -Path ..\.env -Pattern '^APP_KEYS=').Line -replace '.*flutter-app:([^,]+).*', '$1')
+flutter devices
+flutter run --dart-define=SERVER_URL=http://${ip}:4000 --dart-define=APP_KEY=$key
+```
+
+### (b) Release APK
+
+```powershell
+cd mobile
+flutter build apk --release --dart-define=SERVER_URL=http://${ip}:4000 --dart-define=APP_KEY=$key
+# Output: mobile\build\app\outputs\flutter-apk\app-release.apk
+flutter install --release        # or: adb install -r build\app\outputs\flutter-apk\app-release.apk
+```
+
+The release build is signed with the Flutter debug key (template default). That's fine for sideloading a demo; configure a real keystore before distribution.
+
+### Security notes
+
+- **No secrets in the repo.** The app key comes only from `--dart-define=APP_KEY` or the Settings screen; `mobile/.gitignore` excludes keystores and `dart_defines*.json`. A key compiled into an APK (or typed into Settings) is still readable by someone who has the phone or APK. It identifies the app; it isn't a secret. Production needs Play Integrity / App Attest on top.
+- **Cleartext HTTP** is allowed only for the LAN demo (`android/app/src/main/res/xml/network_security_config.xml`). **Production must use HTTPS** and remove that config.
+- Photos are deleted from the app cache after upload; History stores results only.
+
 ## Demo instructions (for reviewers)
 
 1. **Overview:** stat cards, the 14-day activity chart, the authentication-status breakdown and recent activity, all driven by the live database.
@@ -233,6 +399,7 @@ curl -s localhost:4000/api/verify -H 'Content-Type: application/json' -H "X-App-
 6. **Settings:** change thresholds and see the payload format and authorized app IDs. **Reset demo data** restores the starting state.
 7. **Security & Limitations:** the technical explanation for stakeholders.
 8. Open `http://localhost:5173/v/anything` to see the page shown for retired URL labels: *"Scan this label with the official VERIQ app"*.
+9. **Physical check:** print a label PDF, open `/scan-physical` on a phone, photograph the original (green **Original product**), then a photocopy and a screen showing the label (red **Copy suspected**). Results appear in Verification Logs as "Photo check" with score and threshold.
 
 ### Suggested 3-minute video walkthrough
 
@@ -263,11 +430,12 @@ curl -s localhost:4000/api/verify -H 'Content-Type: application/json' -H "X-App-
 - Demo operator authentication with hashed bearer sessions
 - Persistent SQLite storage with versioned migrations, seeding, and reset (CLI and UI)
 - Responsive layout (desktop to 390 px), mobile navigation drawer
-- Tests: 28 Vitest unit/integration tests, an ESLint configuration, strict TypeScript, and a browser E2E smoke script
+- Copy Detection Pattern: per-label HMAC-derived pattern in the QR centre (EC level H, ≤ 12 % overlay), vector SVG + A4 print PDF with ruler, zoomed pattern view, Python/OpenCV analysis service, `/api/verify-physical`, configurable threshold, Calibration page with histogram and suggested threshold, phone capture page `/scan-physical`
+- Tests: 40 Vitest tests (incl. `/api/verify-physical` with the Python service mocked), 12 pytest tests on synthetic print/photocopy/screen captures, an ESLint configuration, strict TypeScript, a full-chain CDP smoke script, and a browser E2E smoke script
 
 ## Limitations
 
-- **A QR code can be copied.** The signature stops forged or modified payloads, but a photo, screen or reprint of a genuine label carries the identical signed payload. Repeat-scan rules are risk signals, not proof.
+- **A QR code can be copied.** The signature stops forged or modified payloads, but a photo, screen or reprint of a genuine label carries the identical signed payload. Repeat-scan rules are risk signals, not proof. The copy-detection pattern adds a physical check through `/api/verify-physical`, but it is a calibrated heuristic, not 100 % copy-proof (see [Honest limitations](#honest-limitations)).
 - **App keys are identifiers, not secrets.** The web scanner's key is visible in its JavaScript bundle, and any key shipped in an app can be extracted. Without app attestation, a determined attacker could build their own client. The payload text is also readable by any QR reader. "App-only" verification raises the bar; it is not a cryptographic guarantee.
 - **Demo-only operator auth:** one account from `.env`, with no SSO, MFA, roles or audit trail of operator actions. Sessions are stored in `localStorage`.
 - **Self-reported scanner identity:** `scannerId` and `location` come from the client and are not authenticated.

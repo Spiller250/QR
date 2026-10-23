@@ -19,6 +19,9 @@ const CSV_HEADER = [
   'flagged',
   'rules_triggered',
   'token_fingerprint',
+  'check_type',
+  'cdp_score',
+  'cdp_threshold',
 ];
 
 function csvCell(v: unknown): string {
@@ -57,6 +60,9 @@ export function logRoutes({ store }: AppContext): Router {
           e.flagged,
           e.rulesTriggered.join('|'),
           e.tokenFingerprint,
+          e.checkType,
+          e.cdpScore,
+          e.cdpThreshold,
         ];
         lines.push(row.map(csvCell).join(','));
       }

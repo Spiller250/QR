@@ -289,6 +289,137 @@ Notes:
 
 ---
 
+## 5. Physical verification with copy detection: `POST /api/verify-physical`
+
+Use this when the app must confirm that the **physical label is an original print**, not just that the code is genuine. Every label has a 6 mm Copy Detection Pattern (40 × 40 cells of 0.15 mm) in the centre of its QR code. The app uploads a photo; the server decodes the QR, runs the same `VQ1` checks as `/api/verify`, and scores how well the microscopic pattern survived. Photocopies, re-prints of photos and photos of screens degrade it.
+
+### Request
+
+```
+POST {API_BASE_URL}/api/verify-physical
+X-App-Key: <flutter-app key>
+Content-Type: multipart/form-data; boundary=…
+```
+
+| Part | Required | Notes |
+|---|---|---|
+| `image` (file) | yes | The **original full-resolution JPEG** (or PNG) from the camera, ≤ 20 MB. Do **not** resize, crop, re-encode or apply filters. |
+| `scannerId` | recommended | Stable per-install ID (same as `/api/verify`) |
+| `location` | optional | Human-readable location |
+| `source` | optional | `camera` (default) or `manual` |
+
+The server decodes the QR from the photo itself. The app does **not** need to decode the payload (it may, for a live "QR in view" hint before capturing).
+
+### Capture requirements (important)
+
+- **Autofocus on the label** (tap-to-focus or focus lock on the centre) and wait for focus before capturing. Use `takePicture()` stills, not preview/stream frames.
+- **Close-up:** 8–12 cm, QR roughly centred. The server needs at least ~2.2 px per 0.15 mm cell (a 30 mm QR spanning ≥ ~450 px in the photo); 4+ px per cell is ideal.
+- **Highest resolution** (`ResolutionPreset.max`), flash **off** by default (glare destroys the pattern), steady hands.
+- Upload the file **as captured**. Messenger-style recompression or downscaling will lower scores of genuine labels.
+
+### Response
+
+`200 OK` for every analysed photo. Check `result`.
+
+| `result` | `reasonCode` | UI | `product` | `score` |
+|---|---|---|---|---|
+| `authentic` | `CDP_MATCH` | Green "Original product" | yes | number ≥ `threshold` |
+| `copy_suspected` | `CDP_DEGRADED` | Red "Copy suspected — this label appears to be a reproduction" | yes (genuine token, copied label) | number < `threshold` |
+| `unreadable` | `NO_QR_FOUND`, `CAPTURE_TOO_BLURRY`, `CAPTURE_TOO_FAR`, `UNSUPPORTED_IMAGE`, `PAYLOAD_MISMATCH` | Grey "Retake photo" + `message` | `null` | `null` |
+| `invalid` | `BAD_SIGNATURE`, `MALFORMED_TOKEN`, `LEGACY_FORMAT`, `TOKEN_NOT_FOUND`, `TOKEN_REVOKED` | Red "Invalid code" + `message` | `null` | `null` |
+
+Original print:
+
+```json
+{
+  "eventId": "evt_X1c9…",
+  "checkedAt": "2026-10-23T09:55:41.120Z",
+  "result": "authentic",
+  "reasonCode": "CDP_MATCH",
+  "message": "Original label: the copy-detection pattern matches a first-generation print.",
+  "score": 0.9433,
+  "threshold": 0.6,
+  "product": { "publicId": "VQ-TJWX-392C", "name": "Meridian Chronograph 42 mm", "manufacturer": "Aurelle Horlogerie (fictional)",
+               "category": "Watches", "batchNumber": "B-2026-0917", "productionDate": "2026-09-17", "status": "active" },
+  "scan": { "scanNumber": 9, "repeatScan": true, "rulesTriggered": [] },
+  "components": { "cellCorrelation": 0.988, "pixelCorrelation": 0.896, "hfRatio": 4.2, "hfScore": 1, "isolatedContrast": 0.877, "fidelity": 0.96, "rotation": 0, "scale": 1 },
+  "diagnostics": { "pixelsPerCell": 4.56, "blurCells": 0.62, "sharpness": 0.77, "edgeWidthPx": 2.83, "qrSidePx": 914.6, "imageWidth": 3000, "imageHeight": 2400, "detector": "opencv", "bytes": 1843201 }
+}
+```
+
+Photocopy / screen:
+
+```json
+{ "result": "copy_suspected", "reasonCode": "CDP_DEGRADED",
+  "message": "Copy suspected: the copy-detection pattern is degraded. This label appears to be a reproduction (photocopy, re-print of a photo, or a screen).",
+  "score": 0.2563, "threshold": 0.6, "product": { "…": "…" }, "scan": { "scanNumber": 10, "repeatScan": true, "rulesTriggered": [] }, "…": "…" }
+```
+
+Blurry capture (no guess is made):
+
+```json
+{ "eventId": "evt_…", "result": "unreadable", "reasonCode": "CAPTURE_TOO_BLURRY",
+  "message": "The photo is too blurry to check the copy-detection pattern. Hold steady, tap to focus and retake.",
+  "score": null, "threshold": 0.6, "product": null, "scan": null, "components": null,
+  "diagnostics": { "pixelsPerCell": 4.5, "blurCells": 2.1, "sharpness": 0 } }
+```
+
+Show `score` vs `threshold` in small text only. They are calibration values, not percentages of "authenticity".
+
+### Errors
+
+| HTTP | `error.code` | App behaviour |
+|---|---|---|
+| 400 | `IMAGE_REQUIRED`, `BAD_UPLOAD` | Bug in the request (field must be named `image`) |
+| 401 | `APP_KEY_MISSING`, `APP_KEY_INVALID` | "This app is not authorized" — configuration problem |
+| 413 | `IMAGE_TOO_LARGE` | > 20 MB; should not happen with phone JPEGs |
+| 429 | `RATE_LIMITED` | Wait and retry |
+| 503 | `CDP_SERVICE_UNAVAILABLE` | Server-side analysis service down — "Try again later" |
+
+Use a **30 s timeout**: analysis of a 12 MP photo takes ~1–3 s on a laptop, plus upload time.
+
+### Dart sketch
+
+```dart
+import 'package:camera/camera.dart';
+import 'package:http/http.dart' as http;
+
+Future<Map<String, dynamic>> verifyPhysical(XFile photo, String scannerId) async {
+  final req = http.MultipartRequest('POST', Uri.parse('$apiBase/api/verify-physical'))
+    ..headers['X-App-Key'] = appKey
+    ..fields['scannerId'] = scannerId
+    ..fields['source'] = 'camera'
+    // fromPath streams the file as captured: no decoding, resizing or re-encoding.
+    ..files.add(await http.MultipartFile.fromPath('image', photo.path));
+  final streamed = await req.send().timeout(const Duration(seconds: 30));
+  final res = await http.Response.fromStream(streamed);
+  final body = jsonDecode(res.body) as Map<String, dynamic>;
+  if (res.statusCode == 401) throw UnauthorizedAppException(body['error']['code']);
+  if (res.statusCode != 200) throw Exception(body['error']?['message'] ?? 'HTTP ${res.statusCode}');
+  return body; // switch on body['result']
+}
+```
+
+Capture with the `camera` package: `CameraController(backCamera, ResolutionPreset.max, enableAudio: false)`, `setFlashMode(FlashMode.off)`, `setFocusPoint` on tap, then `takePicture()`.
+
+---
+
+## 6. Notes from the reference implementation (`mobile/`)
+
+The VERIQ Scanner app in `mobile/` implements §5. Points worth copying:
+
+- **Capture:** `CameraController(backCamera, ResolutionPreset.max, enableAudio: false, imageFormatGroup: ImageFormatGroup.jpeg)`, `setFlashMode(FlashMode.off)` at start (the toggle switches `FlashMode.torch`), `setFocusMode(FocusMode.auto)`. Tap-to-focus maps the tap from the cover-scaled preview back into preview coordinates before `setFocusPoint`/`setExposurePoint`. `mobile_scanner` is **not** used: two plugins competing for the camera is fragile, and the server decodes the QR anyway.
+- **Upload unmodified:** `takePicture()` returns an `XFile` path; `http.MultipartFile.fromPath('image', path, contentType: MediaType('image', 'jpeg'))` streams the file from disk. Nothing decodes or re-encodes it. A test asserts the bytes arrive unchanged.
+- **Timeout:** 30 s around both `send()` and reading the response.
+- **Error mapping** (`lib/api/api_error.dart`): `SocketException`/`ClientException` → "Cannot reach the VERIQ server at … same Wi-Fi?"; `TimeoutException` → timeout; 401 → "app key rejected" (or "no app key" for `APP_KEY_MISSING`); 503 → "analysis service not running"; 429/413/4xx/5xx → specific messages. Only network/timeout/503/429/5xx offer *Retry upload* (same photo).
+- **Test connection** (Settings): `GET /api/health`, then a multipart `POST /api/verify-physical` **without an image** and with the key. The API checks `X-App-Key` before parsing the upload, so `401` means a bad key and `400 IMAGE_REQUIRED` means the key works. Nothing is analysed or logged.
+- **scannerId:** UUID v4 generated on first launch, stored in `shared_preferences`, sent with every scan.
+- **Server URL:** the app calls the Express API directly (`http://<PC-IP>:4000`). The Vite dev server (`:5173`) also proxies `/api` and works too.
+- **Android:** `INTERNET` and `CAMERA` permissions in the main manifest (release builds need `INTERNET` there explicitly). The in-app rationale screen is shown before the system prompt, with *Open settings* if permanently denied. `minSdk 23`. Cleartext only via `network_security_config.xml` for the LAN demo.
+- **Privacy:** the photo file is deleted after the result screen closes; History keeps result, score, product name and time only (last 50).
+
+---
+
 ## Production notes
 
 - **An app key is an identifier, not a secret.** Anything compiled into an app can be extracted. Combine the key with **app attestation**: Google Play Integrity on Android and App Attest / DeviceCheck on iOS. The server should verify the attestation token before accepting a scan, and keys should be rotatable per app version.

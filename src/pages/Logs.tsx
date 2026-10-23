@@ -88,6 +88,8 @@ export function LogsPage() {
             <option value="suspicious">Suspicious</option>
             <option value="invalid">Invalid</option>
             <option value="revoked">Revoked</option>
+            <option value="copy_suspected">Copy suspected</option>
+            <option value="unreadable">Unreadable photo</option>
           </select>
           <select className="select" value={query.flagged ?? ''} onChange={(e) => update({ flagged: e.target.value || undefined })} aria-label="Repeat-scan warning">
             <option value="">Any warning state</option>
@@ -170,6 +172,11 @@ export function LogsPage() {
                     </td>
                     <td>
                       <ResultBadge result={e.result} />
+                      {e.checkType === 'physical' && (
+                        <div className="cell-sub">
+                          Photo check{e.cdpScore !== null ? ` · ${e.cdpScore.toFixed(2)} / ${e.cdpThreshold?.toFixed(2)}` : ''}
+                        </div>
+                      )}
                     </td>
                     <td className="mono small nowrap">{e.reasonCode}</td>
                     <td className="mono small nowrap">{e.appClient ?? '—'}</td>

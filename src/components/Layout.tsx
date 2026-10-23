@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Boxes,
   FlaskConical,
+  Gauge,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -21,6 +22,7 @@ const NAV = [
   { to: '/qr-codes', label: 'QR Codes', icon: QrCode },
   { to: '/logs', label: 'Verification Logs', icon: ListChecks },
   { to: '/demo', label: 'Live Demo', icon: FlaskConical, pill: 'POC' },
+  { to: '/calibration', label: 'Calibration', icon: Gauge, pill: 'CDP' },
   { to: '/security', label: 'Security & Limitations', icon: ShieldAlert },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -63,7 +65,7 @@ export function Layout() {
             </NavLink>
           ))}
           <div className="nav-section">Demonstration</div>
-          {NAV.slice(4, 6).map((n) => (
+          {NAV.slice(4, 7).map((n) => (
             <NavLink key={n.to} to={n.to}>
               <n.icon size={17} />
               {n.label}
@@ -71,7 +73,7 @@ export function Layout() {
             </NavLink>
           ))}
           <div className="nav-section">System</div>
-          {NAV.slice(6).map((n) => (
+          {NAV.slice(7).map((n) => (
             <NavLink key={n.to} to={n.to}>
               <n.icon size={17} />
               {n.label}
